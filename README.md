@@ -1,6 +1,6 @@
 # aiida-melting
 
-`aiida-melting` 0.2.0 is an MIT-licensed, extensible AiiDA framework for
+`aiida-melting` 0.2.1 is an MIT-licensed, extensible AiiDA framework for
 melting-temperature workflows. It requires Python 3.11 or newer and
 `aiida-core>=2.9,<3`.
 
@@ -75,17 +75,33 @@ exit code are stored in provenance:
 
 Every method returns `melting_temperature` (`Float`, kelvin), `status` (`Str`),
 and `report` (`Dict`). Temperature must be finite and positive. Allowed statuses
-are `success`, `unconverged`, and `ambiguous`. Execution failures are represented
-only by non-zero AiiDA exit codes, not successful-process statuses. Child process
-failure or malformed output fails dispatch. Valid child output nodes are
-forwarded unchanged, and the dispatcher records a `CALL_WORK` link to the child.
+are `success`, `unconverged`, and `ambiguous`. An `ambiguous` result still carries
+a positive provisional melting-temperature estimate; methods should explain its
+interpretation in the report. Execution failures are represented only by non-zero
+AiiDA exit codes, not successful-process statuses. Child process failure or
+malformed output fails dispatch. Valid child output nodes are forwarded unchanged,
+and the dispatcher records a `CALL_WORK` link to the child.
 
 The report permits extension fields but requires `method`, `units`,
-`composition`, `pressure`, `calculator`, and `convergence_status`. Units must
-identify melting temperature as `K` and pressure as `GPa`; the calculator field
-must contain its name; and convergence status must equal the top-level status.
-The dispatcher verifies the report's composition, pressure, calculator identity,
-and canonical method identifier against its inputs.
+`composition`, `pressure`, and `calculator`. Units must identify melting
+temperature as `K` and pressure as `GPa`, and the calculator field must contain
+its name. The dispatcher verifies the report's composition, pressure, calculator
+identity, and canonical method identifier against its inputs.
+
+Convergence is distinct from the overall scientific status and is method-specific.
+Methods performing convergence studies should add a structured extension such as:
+
+```python
+"convergence": {
+    "variable": "atom_count",
+    "tested_values": [256, 500, 864],
+    "tolerance_K": 20,
+    "converged": True,
+}
+```
+
+A result may therefore be cell-size converged while its overall status remains
+`ambiguous` for another scientific reason.
 
 ## Mock example
 

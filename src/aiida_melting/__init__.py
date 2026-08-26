@@ -8,4 +8,4 @@ __all__ = (
     "get_method_inputs",
     "list_melting_methods",
 )
-__version__ = "0.2.0"
+__version__ = "0.2.1"

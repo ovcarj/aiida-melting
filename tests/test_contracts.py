@@ -73,7 +73,7 @@ class TestContracts:
     def test_output_validation(self):
         valid = {
             "melting_temperature": orm.Float(1000),
-            "status": orm.Str("unconverged"),
+            "status": orm.Str("ambiguous"),
             "report": orm.Dict(
                 dict={
                     "method": "melting.mock",
@@ -81,7 +81,12 @@ class TestContracts:
                     "composition": {"Al": 1.0},
                     "pressure": 0.0,
                     "calculator": {"name": "test"},
-                    "convergence_status": "unconverged",
+                    "convergence": {
+                        "variable": "atom_count",
+                        "tested_values": [256, 500],
+                        "tolerance_K": 20,
+                        "converged": True,
+                    },
                 }
             ),
         }

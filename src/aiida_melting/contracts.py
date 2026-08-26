@@ -155,7 +155,6 @@ def validate_source_specification(value: orm.Dict | Mapping[str, Any]) -> dict[s
 
 def validate_report(
     report: orm.Dict,
-    status: str,
     *,
     composition: Mapping[str, float] | None = None,
     pressure: float | None = None,
@@ -164,7 +163,7 @@ def validate_report(
 ) -> str | None:
     """Validate the minimal common report schema and optional expected values."""
     raw = report.get_dict()
-    required = {"method", "units", "composition", "pressure", "calculator", "convergence_status"}
+    required = {"method", "units", "composition", "pressure", "calculator"}
     if missing := required - raw.keys():
         return f"report is missing fields: {', '.join(sorted(missing))}"
     if not isinstance(raw["method"], str) or not raw["method"]:
@@ -198,8 +197,6 @@ def validate_report(
         return "report.calculator must contain a string name"
     if calculator_name is not None and calculator["name"] != calculator_name:
         return "report.calculator.name does not match calculator metadata"
-    if raw["convergence_status"] != status:
-        return "report.convergence_status must match status"
     return None
 
 
@@ -232,7 +229,6 @@ def validate_outputs(
         return "child report must be a Dict"
     return validate_report(
         report,
-        status.value,
         composition=composition,
         pressure=pressure,
         calculator_name=calculator_name,

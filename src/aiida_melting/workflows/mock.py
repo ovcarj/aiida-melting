@@ -22,7 +22,6 @@ def create_mock_outputs(
                 "units": {"melting_temperature": "K", "pressure": "GPa"},
                 "pressure": pressure.value,
                 "calculator": {"name": calculator_metadata.get_dict()["name"]},
-                "convergence_status": "success",
                 "warnings": ["Mock result only: no scientific melting calculation was performed."],
             }
         ),

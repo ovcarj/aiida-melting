@@ -69,7 +69,7 @@ def test_mock_workchain(inputs):
     }
     assert results["report"].get_dict()["pressure"] == 0.0
     assert results["report"].get_dict()["calculator"] == {"name": "mock-calculator"}
-    assert results["report"].get_dict()["convergence_status"] == "success"
+    assert "convergence_status" not in results["report"].get_dict()
     assert "no scientific" in results["report"].get_dict()["warnings"][0].lower()
 
 
