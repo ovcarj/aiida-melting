@@ -11,7 +11,7 @@ from aiida_melting.workflows.mock import MockMeltingWorkChain
 
 @calcfunction
 def make_test_outputs() -> dict[str, orm.Data]:
-    return {"status": orm.Str("warning"), "report": orm.Dict(dict={"test": True})}
+    return {"status": orm.Str("ambiguous"), "report": orm.Dict(dict={"test": True})}
 
 
 class InvalidOutputWorkChain(BaseMeltingWorkChain):
@@ -42,13 +42,17 @@ class FailedWorkChain(BaseMeltingWorkChain):
 def inputs():
     return {
         "composition": orm.Dict(dict={"Al": 2, "O": 3}),
-        "calculator": orm.Dict(
-            dict={
-                "name": "mock-calculator",
-                "provides": ["energy", "forces", "stress"],
-                "metadata": {"version": "none"},
-            }
-        ),
+        "pressure": orm.Float(0.0),
+        "description": orm.Str("contract stabilization test"),
+        "calculator": {
+            "metadata": orm.Dict(
+                dict={
+                    "name": "mock-calculator",
+                    "provides": ["energy", "forces", "stress"],
+                    "metadata": {"version": "none"},
+                }
+            ),
+        },
         "method_parameters": {"temperature": orm.Float(1234.5)},
     }
 
@@ -59,12 +63,21 @@ def test_mock_workchain(inputs):
     assert node.is_finished_ok
     assert results["melting_temperature"].value == 1234.5
     assert results["status"].value == "success"
-    assert results["report"].get_dict()["units"] == {"melting_temperature": "K"}
+    assert results["report"].get_dict()["units"] == {
+        "melting_temperature": "K",
+        "pressure": "GPa",
+    }
+    assert results["report"].get_dict()["pressure"] == 0.0
+    assert results["report"].get_dict()["calculator"] == {"name": "mock-calculator"}
+    assert results["report"].get_dict()["convergence_status"] == "success"
     assert "no scientific" in results["report"].get_dict()["warnings"][0].lower()
 
 
 @pytest.mark.usefixtures("aiida_profile_clean")
 def test_dispatcher_forwards_nodes_and_records_call(inputs):
+    inputs["calculator"]["files"] = {
+        "potential": orm.SinglefileData.from_bytes(b"mock potential", filename="potential.eam")
+    }
     results, node = run_get_node(MeltingWorkChain, method=orm.Str("mock"), **inputs)
     assert node.is_finished_ok
     called = node.called
@@ -74,6 +87,12 @@ def test_dispatcher_forwards_nodes_and_records_call(inputs):
     assert results["melting_temperature"].uuid == child.outputs.melting_temperature.uuid
     assert results["status"].uuid == child.outputs.status.uuid
     assert results["report"].uuid == child.outputs.report.uuid
+    assert child.inputs.pressure.uuid == inputs["pressure"].uuid
+    assert child.inputs.description.uuid == inputs["description"].uuid
+    assert (
+        child.inputs.calculator.files.potential.uuid
+        == inputs["calculator"]["files"]["potential"].uuid
+    )
 
 
 @pytest.mark.usefixtures("aiida_profile_clean")

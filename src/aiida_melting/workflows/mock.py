@@ -9,7 +9,9 @@ from ..contracts import BaseMeltingWorkChain, normalize_composition, validate_ca
 
 
 @calcfunction
-def create_mock_outputs(composition: orm.Dict) -> dict[str, orm.Data]:
+def create_mock_outputs(
+    composition: orm.Dict, pressure: orm.Float, calculator_metadata: orm.Dict
+) -> dict[str, orm.Data]:
     """Create mock output nodes with explicit calculation provenance."""
     return {
         "status": orm.Str("success"),
@@ -17,7 +19,10 @@ def create_mock_outputs(composition: orm.Dict) -> dict[str, orm.Data]:
             dict={
                 "method": "melting.mock",
                 "composition": normalize_composition(composition),
-                "units": {"melting_temperature": "K"},
+                "units": {"melting_temperature": "K", "pressure": "GPa"},
+                "pressure": pressure.value,
+                "calculator": {"name": calculator_metadata.get_dict()["name"]},
+                "convergence_status": "success",
                 "warnings": ["Mock result only: no scientific melting calculation was performed."],
             }
         ),
@@ -39,7 +44,7 @@ class MockMeltingWorkChain(BaseMeltingWorkChain):
     def validate_inputs(self):
         try:
             self.ctx.composition = normalize_composition(self.inputs.composition)
-            validate_calculator(self.inputs.calculator)
+            validate_calculator(self.inputs.calculator.metadata)
             temperature = self.inputs.method_parameters.temperature.value
             if not math.isfinite(temperature) or temperature <= 0:
                 raise ValueError("method_parameters.temperature must be finite and positive")
@@ -67,4 +72,8 @@ class MockMeltingWorkChain(BaseMeltingWorkChain):
     def run_mock(self):
         temperature = self.inputs.method_parameters.temperature
         self.out("melting_temperature", temperature)
-        self.out_many(create_mock_outputs(self.inputs.composition))
+        self.out_many(
+            create_mock_outputs(
+                self.inputs.composition, self.inputs.pressure, self.inputs.calculator.metadata
+            )
+        )

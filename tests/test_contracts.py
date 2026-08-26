@@ -11,6 +11,7 @@ from aiida_melting.contracts import (
     structure_composition,
     validate_calculator,
     validate_outputs,
+    validate_pressure,
     validate_source_specification,
     validate_structure_composition,
 )
@@ -72,9 +73,23 @@ class TestContracts:
     def test_output_validation(self):
         valid = {
             "melting_temperature": orm.Float(1000),
-            "status": orm.Str("not_converged"),
-            "report": orm.Dict(dict={}),
+            "status": orm.Str("unconverged"),
+            "report": orm.Dict(
+                dict={
+                    "method": "melting.mock",
+                    "units": {"melting_temperature": "K", "pressure": "GPa"},
+                    "composition": {"Al": 1.0},
+                    "pressure": 0.0,
+                    "calculator": {"name": "test"},
+                    "convergence_status": "unconverged",
+                }
+            ),
         }
         assert validate_outputs(valid) is None
         assert validate_outputs({**valid, "melting_temperature": orm.Float(math.nan)})
         assert validate_outputs({**valid, "status": orm.Str("unknown")})
+
+    def test_pressure(self):
+        assert validate_pressure(orm.Float(-2.5)) == -2.5
+        with pytest.raises(ValidationError):
+            validate_pressure(math.inf)

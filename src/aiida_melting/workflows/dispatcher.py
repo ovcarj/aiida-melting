@@ -10,9 +10,10 @@ from ..contracts import (
     normalize_composition,
     validate_calculator,
     validate_outputs,
+    validate_pressure,
     validate_structure_composition,
 )
-from ..registry import get_melting_workflow
+from ..registry import canonicalize_identifier, get_melting_workflow
 from ..structures import resolve_structure
 
 
@@ -35,7 +36,8 @@ class MeltingWorkChain(WorkChain):
     def validate_and_prepare(self):
         try:
             self.ctx.composition = normalize_composition(self.inputs.composition)
-            validate_calculator(self.inputs.calculator)
+            self.ctx.calculator = validate_calculator(self.inputs.calculator.metadata)
+            self.ctx.pressure = validate_pressure(self.inputs.pressure)
         except Exception as exception:
             return self.exit_codes.ERROR_INVALID_INPUT.format(reason=str(exception))
 
@@ -69,8 +71,11 @@ class MeltingWorkChain(WorkChain):
         inputs = {
             "composition": self.inputs.composition,
             "calculator": self.inputs.calculator,
+            "pressure": self.inputs.pressure,
             "method_parameters": self.ctx.parameters,
         }
+        if "description" in self.inputs:
+            inputs["description"] = self.inputs.description
         if "structure" in self.ctx:
             inputs["structure"] = self.ctx.structure
         return ToContext(child=self.submit(self.ctx.workflow_class, **inputs))
@@ -83,7 +88,13 @@ class MeltingWorkChain(WorkChain):
             )
         output_names = ("melting_temperature", "status", "report")
         outputs = {name: getattr(child.outputs, name, None) for name in output_names}
-        error = validate_outputs(outputs)
+        error = validate_outputs(
+            outputs,
+            composition=self.ctx.composition,
+            pressure=self.ctx.pressure,
+            calculator_name=self.ctx.calculator["name"],
+            method=canonicalize_identifier(self.inputs.method.value),
+        )
         if error:
             return self.exit_codes.ERROR_MALFORMED_OUTPUTS.format(reason=error)
         for name in output_names:

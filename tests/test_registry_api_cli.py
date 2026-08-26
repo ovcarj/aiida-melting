@@ -24,7 +24,18 @@ def test_registry_aliases():
 
 def test_introspection():
     common = get_common_inputs()
-    assert set(common) == {"calculator", "composition", "method", "structure"}
+    assert set(common) == {
+        "calculator",
+        "composition",
+        "description",
+        "method",
+        "pressure",
+        "structure",
+    }
+    assert common["pressure"]["required"] is True
+    assert common["description"]["required"] is False
+    assert common["calculator"]["children"]["metadata"]["types"] == ["Dict"]
+    assert common["calculator"]["children"]["files"]["dynamic"] is True
     method = get_method_inputs("mock")
     assert method["temperature"]["types"] == ["Float"]
     assert method["temperature"]["required"] is True

@@ -10,14 +10,33 @@ from aiida import orm
 from aiida.common.exceptions import ValidationError
 from aiida.engine import WorkChain
 
-ALLOWED_STATUSES = frozenset({"success", "warning", "not_converged", "failed"})
+ALLOWED_STATUSES = frozenset({"success", "unconverged", "ambiguous"})
 REQUIRED_CAPABILITIES = frozenset({"energy", "forces", "stress"})
 
 
 def define_common_inputs(spec, *, include_method: bool = False) -> None:
     """Define the common input ports on a process specification."""
     spec.input("composition", valid_type=orm.Dict, help="Chemical composition mapping.")
-    spec.input("calculator", valid_type=orm.Dict, help="Calculator capability description.")
+    spec.input("pressure", valid_type=orm.Float, help="Applied pressure in GPa.")
+    spec.input(
+        "description",
+        valid_type=orm.Str,
+        required=False,
+        help="Human-readable calculation description.",
+    )
+    spec.input_namespace("calculator", help="Calculator description and artifacts.")
+    spec.input(
+        "calculator.metadata",
+        valid_type=orm.Dict,
+        help="Calculator identity, capabilities, and implementation metadata.",
+    )
+    spec.input_namespace(
+        "calculator.files",
+        valid_type=orm.SinglefileData,
+        dynamic=True,
+        required=False,
+        help="Named provenance-tracked calculator artifacts.",
+    )
     spec.input(
         "structure",
         valid_type=(orm.StructureData, orm.Dict),
@@ -86,6 +105,14 @@ def validate_calculator(value: orm.Dict | Mapping[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def validate_pressure(value: orm.Float | float) -> float:
+    """Return a finite pressure in GPa."""
+    pressure = value.value if isinstance(value, orm.Float) else float(value)
+    if not math.isfinite(pressure):
+        raise ValidationError("pressure must be finite")
+    return pressure
+
+
 def structure_composition(structure: orm.StructureData) -> dict[str, float]:
     """Return normalized composition, including weighted/mixed-occupancy kinds."""
     amounts: dict[str, float] = {}
@@ -126,7 +153,64 @@ def validate_source_specification(value: orm.Dict | Mapping[str, Any]) -> dict[s
     return raw
 
 
-def validate_outputs(outputs: Mapping[str, orm.Data]) -> str | None:
+def validate_report(
+    report: orm.Dict,
+    status: str,
+    *,
+    composition: Mapping[str, float] | None = None,
+    pressure: float | None = None,
+    calculator_name: str | None = None,
+    method: str | None = None,
+) -> str | None:
+    """Validate the minimal common report schema and optional expected values."""
+    raw = report.get_dict()
+    required = {"method", "units", "composition", "pressure", "calculator", "convergence_status"}
+    if missing := required - raw.keys():
+        return f"report is missing fields: {', '.join(sorted(missing))}"
+    if not isinstance(raw["method"], str) or not raw["method"]:
+        return "report.method must be a non-empty string"
+    if method is not None and raw["method"] != method:
+        return f"report.method must be {method!r}"
+    units = raw["units"]
+    if (
+        not isinstance(units, dict)
+        or units.get("melting_temperature") != "K"
+        or units.get("pressure") != "GPa"
+    ):
+        return "report.units must define melting_temperature='K' and pressure='GPa'"
+    try:
+        reported_composition = normalize_composition(raw["composition"])
+    except (TypeError, ValidationError) as exception:
+        return f"report.composition is invalid: {exception}"
+    if composition is not None and (
+        set(reported_composition) != set(composition)
+        or any(abs(reported_composition[key] - composition[key]) > 1e-8 for key in composition)
+    ):
+        return "report.composition does not match the requested composition"
+    try:
+        reported_pressure = validate_pressure(float(raw["pressure"]))
+    except (TypeError, ValueError, ValidationError) as exception:
+        return f"report.pressure is invalid: {exception}"
+    if pressure is not None and abs(reported_pressure - pressure) > 1e-12:
+        return "report.pressure does not match the requested pressure"
+    calculator = raw["calculator"]
+    if not isinstance(calculator, dict) or not isinstance(calculator.get("name"), str):
+        return "report.calculator must contain a string name"
+    if calculator_name is not None and calculator["name"] != calculator_name:
+        return "report.calculator.name does not match calculator metadata"
+    if raw["convergence_status"] != status:
+        return "report.convergence_status must match status"
+    return None
+
+
+def validate_outputs(
+    outputs: Mapping[str, orm.Data],
+    *,
+    composition: Mapping[str, float] | None = None,
+    pressure: float | None = None,
+    calculator_name: str | None = None,
+    method: str | None = None,
+) -> str | None:
     """Return an error message when common workflow outputs are malformed."""
     required = {"melting_temperature", "status", "report"}
     if missing := required - outputs.keys():
@@ -146,7 +230,14 @@ def validate_outputs(outputs: Mapping[str, orm.Data]) -> str | None:
         return f"child status must be one of: {', '.join(sorted(ALLOWED_STATUSES))}"
     if not isinstance(report, orm.Dict):
         return "child report must be a Dict"
-    return None
+    return validate_report(
+        report,
+        status.value,
+        composition=composition,
+        pressure=pressure,
+        calculator_name=calculator_name,
+        method=method,
+    )
 
 
 class BaseMeltingWorkChain(WorkChain):
