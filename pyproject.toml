@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Juraj Ovčar" }]
-dependencies = ["aiida-core>=2.9,<3"]
+dependencies = ["aiida-core>=2.9,<3", "ase>=3.23", "PyYAML>=6"]
 
 [project.optional-dependencies]
 dev = ["build>=1", "pytest>=8", "ruff>=0.9"]
