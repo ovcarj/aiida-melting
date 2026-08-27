@@ -4,9 +4,9 @@
 melting-temperature workflows. It requires Python 3.11 or newer and
 `aiida-core>=2.9,<3`.
 
-This initial release provides the framework and a deterministic mock workflow.
-It does **not** implement scientific melting calculations, Calphy integration,
-Materials Project access, structure generation, or calculator execution.
+The package provides the framework, a deterministic mock workflow, and a direct
+Calphy 2.0.1 integration for EAM and pre-converted MACE/ML-IAP models. Materials
+Project retrieval and implicit model download/conversion are not implemented.
 
 ## Installation
 
@@ -14,8 +14,10 @@ Materials Project access, structure generation, or calculator execution.
 python -m pip install -e '.[dev]'
 ```
 
-The package registers `melting.calculate` and `melting.mock` in the
-`aiida.workflows` entry-point group. Inspect the installation with either CLI:
+The package registers `melting.calculate`, `melting.mock`, and `melting.calphy`
+in the `aiida.workflows` entry-point group. It also registers the
+`melting.calphy` calculation and parser entry points. Inspect the installation
+with either CLI:
 
 ```console
 aiida-melting methods
@@ -142,9 +144,9 @@ report, reports kelvin units, and adds an explicit non-scientific warning.
 Subclass `aiida_melting.contracts.BaseMeltingWorkChain`, add inputs below its
 `method_parameters` namespace, and implement the common outputs. Register the
 class under a canonical `melting.<name>` entry point in `aiida.workflows`.
-Discovery is dynamic: no dispatcher or registry edit is needed. A future Calphy
-integration should therefore register `melting.calphy` and independently supply
-its calculation and validation implementation.
+Discovery is dynamic: no dispatcher or registry edit is needed. The included
+Calphy implementation follows this pattern and is documented in
+[docs/calphy.md](docs/calphy.md).
 
 The public helpers `list_melting_methods()`, `get_melting_workflow(identifier)`,
 `get_common_inputs()`, and `get_method_inputs(identifier)` support programmatic

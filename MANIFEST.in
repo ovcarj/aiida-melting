@@ -1,0 +1,2 @@
+recursive-include docs *.md
+include tests/fixtures/calphy_kernel
