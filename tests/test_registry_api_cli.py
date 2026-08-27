@@ -9,11 +9,14 @@ from click.testing import CliRunner
 from aiida_melting.api import get_common_inputs, get_melting_workflow, get_method_inputs
 from aiida_melting.cli.main import main
 from aiida_melting.registry import list_melting_methods
+from aiida_melting.workflows.calphy import CalphyMeltingWorkChain
 from aiida_melting.workflows.mock import MockMeltingWorkChain
 
 
 def test_registry_aliases():
+    assert "melting.calphy" in list_melting_methods()
     assert "melting.mock" in list_melting_methods()
+    assert get_melting_workflow("calphy") is CalphyMeltingWorkChain
     assert get_melting_workflow("mock") is MockMeltingWorkChain
     assert get_melting_workflow("melting.mock") is MockMeltingWorkChain
     with pytest.raises(EntryPointError):
@@ -39,6 +42,10 @@ def test_introspection():
     method = get_method_inputs("mock")
     assert method["temperature"]["types"] == ["Float"]
     assert method["temperature"]["required"] is True
+    calphy = get_method_inputs("calphy")
+    assert calphy["calphy_code"]["types"] == ["InstalledCode"]
+    assert calphy["supercell"]["required"] is False
+    assert calphy["temperature_guess"]["required"] is True
 
 
 def test_standalone_cli():

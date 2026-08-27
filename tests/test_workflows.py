@@ -1,5 +1,7 @@
 """End-to-end tests using an in-memory AiiDA runner."""
 
+from pathlib import Path
+
 import pytest
 from aiida import orm
 from aiida.engine import calcfunction, run_get_node
@@ -7,6 +9,8 @@ from aiida.engine import calcfunction, run_get_node
 from aiida_melting.contracts import BaseMeltingWorkChain
 from aiida_melting.workflows.dispatcher import MeltingWorkChain
 from aiida_melting.workflows.mock import MockMeltingWorkChain
+
+FAKE_CALPHY = Path(__file__).parent / "fixtures" / "calphy_kernel"
 
 
 @calcfunction
@@ -148,3 +152,61 @@ def test_failed_child(monkeypatch, inputs):
     )
     _, node = run_get_node(MeltingWorkChain, method=orm.Str("failed-test"), **inputs)
     assert node.exit_status == 301
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_calphy_dispatcher_end_to_end(aiida_localhost):
+    calphy_code = orm.InstalledCode(
+        computer=aiida_localhost,
+        label="fake-calphy",
+        filepath_executable=str(FAKE_CALPHY),
+    ).store()
+    lammps_code = orm.InstalledCode(
+        computer=aiida_localhost,
+        label="fake-lammps",
+        filepath_executable="/bin/true",
+    ).store()
+    structure = orm.StructureData(cell=[[3.6, 0, 0], [0, 3.6, 0], [0, 0, 3.6]])
+    structure.append_atom(position=(0, 0, 0), symbols="Cu")
+    artifact = orm.SinglefileData.from_bytes(b"fake eam", filename="Cu.eam.alloy")
+    supplied = {
+        "composition": orm.Dict(dict={"Cu": 1}),
+        "pressure": orm.Float(0.1),
+        "calculator": {
+            "metadata": orm.Dict(
+                dict={
+                    "name": "eam",
+                    "provides": ["energy", "forces", "stress"],
+                    "metadata": {"pair_style": "eam/alloy", "elements": ["Cu"]},
+                }
+            ),
+            "files": {"potential": artifact},
+        },
+        "structure": structure,
+        "method": orm.Str("calphy"),
+        "method_parameters": {
+            "calphy_code": calphy_code,
+            "lammps_code": lammps_code,
+            "temperature_guess": orm.Float(1300),
+            "seed": orm.Int(12345),
+        },
+    }
+    results, node = run_get_node(MeltingWorkChain, **supplied)
+    assert node.is_finished_ok, node.exit_message
+    method = node.called[0]
+    restart = method.called[1]
+    calcjob = restart.called[0]
+    assert method.process_type == "aiida.workflows:melting.calphy"
+    assert calcjob.process_type == "aiida.calculations:melting.calphy"
+    assert results["melting_temperature"].value == 1325.5
+    assert results["melting_temperature"].uuid == calcjob.outputs.melting_temperature.uuid
+    assert results["status"].value == "success"
+    report = results["report"].get_dict()
+    assert report["method"] == "melting.calphy"
+    assert report["pressure_bar"] == 1000.0
+    assert report["calculator"]["artifact_uuid"] == artifact.uuid
+    assert report["codes"]["calphy"]["uuid"] == calphy_code.uuid
+    assert report["codes"]["lammps"]["uuid"] == lammps_code.uuid
+    assert report["codes"]["lammps"]["prepend_append_scripts_applied"] is False
+    assert report["uncertainty_available"] is True
+    assert "melting_temperature.log" in report["retrieved_files"]

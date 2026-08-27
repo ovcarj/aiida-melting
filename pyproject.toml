@@ -19,6 +19,13 @@ dev = ["build>=1", "pytest>=8", "ruff>=0.9"]
 [project.entry-points."aiida.workflows"]
 "melting.calculate" = "aiida_melting.workflows.dispatcher:MeltingWorkChain"
 "melting.mock" = "aiida_melting.workflows.mock:MockMeltingWorkChain"
+"melting.calphy" = "aiida_melting.workflows.calphy:CalphyMeltingWorkChain"
+
+[project.entry-points."aiida.calculations"]
+"melting.calphy" = "aiida_melting.calculations.calphy:CalphyCalculation"
+
+[project.entry-points."aiida.parsers"]
+"melting.calphy" = "aiida_melting.parsers.calphy:CalphyParser"
 
 [project.entry-points."aiida.cmdline.data"]
 melting = "aiida_melting.cli.data:melting"
@@ -31,6 +38,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires configured real Calphy/LAMMPS infrastructure"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+test "$1" = "-i"
+test "$2" = "input.yaml"
+test "$3" = "-k"
+test "$4" = "0"
+test -f structure.data
+mkdir -p ts-fcc-solid-1000-0 ts-fcc-liquid-1000-0
+printf '%s\n' 'results:' '  free_energy: -3.0' > ts-fcc-solid-1000-0/report.yaml
+printf '%s\n' 'results:' '  free_energy: -2.9' > ts-fcc-liquid-1000-0/report.yaml
+printf '%s\n' 'STATE: Temperature range of 900-1700 K' 'STATE: Tm = 1325.50 K +/- 4.25 K' > melting_temperature.log
+printf '%s\n' 'fake calphy completed'
