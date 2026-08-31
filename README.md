@@ -5,8 +5,11 @@ melting-temperature workflows. It requires Python 3.11 or newer and
 `aiida-core>=2.9,<3`.
 
 The package provides the framework, a deterministic mock workflow, and a direct
-Calphy 2.0.1 integration for EAM and pre-converted MACE/ML-IAP models. Materials
-Project retrieval and implicit model download/conversion are not implemented.
+integration targeting Calphy 2.0.1. It supports EAM and the ML-IAP unified MACE
+interface with externally converted `*-mliap_lammps.pt` models. The original
+LAMMPS `pair_style mace` interface is intentionally not supported. One-GPU
+ML-IAP runtime compatibility has been validated. Materials Project retrieval
+and implicit model download/conversion are not implemented.
 
 ## Installation
 

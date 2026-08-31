@@ -1,9 +1,13 @@
 # Calphy melting workflow
 
-`melting.calphy` runs Calphy 2.0.1 directly as one AiiDA `CalcJob`. Calphy owns
-its adaptive melting-temperature loop and starts LAMMPS subprocesses itself.
-Splitting those subprocesses into separate AiiDA calculations would break the
-runtime continuity that Calphy manages.
+`melting.calphy` targets Calphy 2.0.1 and runs Calphy directly as one AiiDA
+`CalcJob`. Calphy owns its adaptive melting-temperature loop and starts LAMMPS
+subprocesses itself. Splitting those subprocesses into separate AiiDA
+calculations would break the runtime continuity that Calphy manages.
+
+The report uses `target_calphy_version` because the configured executable's
+version is not probed at runtime. Its `InstalledCode` UUID and executable path
+remain part of the provenance.
 
 ## Codes and runtime environment
 
@@ -66,7 +70,13 @@ Only these LAMMPS argument token lists are accepted:
 ```python
 []
 ["-k", "on", "g", "1", "-sf", "kk"]
+["-k", "on", "g", "1", "-sf", "kk",
+ "-pk", "kokkos", "newton", "on", "neigh", "half"]
 ```
+
+The ML-IAP MACE schema requires the third list. It exposes exactly one GPU and
+sets the Kokkos Newton and neighbor modes required by the unified interface.
+The shorter GPU list remains available for non-ML-IAP LAMMPS use.
 
 Every token is checked for whitespace and shell metacharacters before the
 closed allowlist comparison. The list is serialized with `shlex.join` to
@@ -105,20 +115,28 @@ calculator={
         "name": "mace",
         "provides": ["energy", "forces", "stress"],
         "metadata": {
-            "model_format": "mace-lammps",
+            "model_format": "mace-mliap",
             "elements": ["Cu"],
         },
     }),
-    "files": {"model": orm.SinglefileData("mace-mpa-0-medium-lammps.pt")},
+    "files": {
+        "model": orm.SinglefileData("mace-mpa-0-medium-mliap_lammps.pt")
+    },
 }
 ```
 
-The MACE artifact must already be a LAMMPS-ready `*lammps.pt` ML-IAP model.
-The workflow emits `pair_style mliap unified <model> 0` and the corresponding
-element-mapped `pair_coeff`. It never downloads or converts a model. Prepare
-MACE-MPA-0 medium externally with the MACE version and target GPU architecture
-used by the LAMMPS build, then import the converted file as `SinglefileData`.
-The model UUID, filename, SHA-256 hash, format, and mapping are reported.
+This is the only supported MACE format. The artifact must already be a
+LAMMPS-ready `*-mliap_lammps.pt` model. The workflow emits `pair_style mliap
+unified ../<model> 0` and the corresponding element-mapped `pair_coeff`. Calphy
+runs each phase one directory below the CalcJob root, so `..` resolves the model
+staged by AiiDA. It never downloads or converts a model. Prepare the model
+externally with the MACE version and target GPU architecture used by the LAMMPS
+build, then import it as `SinglefileData`. The model UUID, filename, SHA-256
+hash, format, and mapping are reported.
+
+Artifact filenames must be whitespace-free basenames and must not collide with
+generated AiiDA/Calphy inputs, scheduler scripts, or stdout/stderr files. Names
+such as `input.yaml`, `structure.data`, and `_aiidasubmit.sh` are rejected.
 
 ## Parsing, retrieval, and retries
 
@@ -126,6 +144,19 @@ The parser reads the final `STATE: Tm = ... K +/- ... K` record and requires a
 finite positive temperature. A completed calculation is `success` unless
 Calphy explicitly emits a reliability diagnostic; a valid provisional estimate
 with such a warning is `ambiguous`. Missing uncertainty alone is not ambiguous.
+
+Known terminal failures are classified before temperature parsing:
+
+| Exit code | Classification |
+| ---: | --- |
+| 305 | Calphy rejected its input |
+| 306 | required LAMMPS style is unavailable |
+| 307 | LAMMPS failed during execution |
+| 308 | Calphy exhausted its melting attempts |
+
+These failures are terminal and retain their code through the internal restart
+wrapper. Only explicitly transient scheduler, transport, and incomplete-
+retrieval failures are retried.
 
 Uncertainty is unavailable when `n_iterations == 1`, or when the reported value
 is absent, zero, negative, NaN, or infinite. No `uncertainty` output is created
