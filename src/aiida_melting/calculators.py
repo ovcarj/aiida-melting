@@ -11,6 +11,18 @@ from aiida.common.exceptions import ValidationError
 
 from .contracts import REQUIRED_CAPABILITIES, validate_calculator
 
+RESERVED_ARTIFACT_FILENAMES = frozenset(
+    {
+        "_aiidasubmit.sh",
+        "_scheduler-stderr.txt",
+        "_scheduler-stdout.txt",
+        "input.yaml",
+        "structure.data",
+        "calphy.stdout",
+        "calphy.stderr",
+    }
+)
+
 
 @dataclass(frozen=True)
 class PotentialSpec:
@@ -61,6 +73,8 @@ def _artifact(files: dict[str, orm.SinglefileData], key: str) -> orm.SinglefileD
     filename = artifact.filename
     if PurePath(filename).name != filename or any(character.isspace() for character in filename):
         raise ValidationError("calculator artifact filename must be a whitespace-free basename")
+    if filename in RESERVED_ARTIFACT_FILENAMES:
+        raise ValidationError(f"calculator artifact filename {filename!r} is reserved")
     return artifact
 
 
@@ -101,10 +115,10 @@ class EamCalculatorAdapter:
 
 
 class MaceCalculatorAdapter:
-    """Translate a pre-converted MACE ML-IAP model to Calphy commands."""
+    """Translate a LAMMPS-ready MACE ML-IAP unified model."""
 
     NAME = "mace"
-    MODEL_FORMAT = "mace-lammps"
+    MODEL_FORMAT = "mace-mliap"
 
     @classmethod
     def translate(
@@ -120,17 +134,20 @@ class MaceCalculatorAdapter:
         elements = _elements(implementation, expected_elements)
         model_format = implementation.get("model_format")
         if model_format != cls.MODEL_FORMAT:
-            raise ValidationError("calculator.metadata.model_format must be 'mace-lammps'")
-        if not artifact.filename.endswith("lammps.pt"):
-            raise ValidationError("MACE model must be an already converted *lammps.pt file")
-        pair_style = f"mliap unified {artifact.filename} 0"
+            raise ValidationError("calculator.metadata.model_format must be 'mace-mliap'")
+        if not artifact.filename.endswith("-mliap_lammps.pt"):
+            raise ValidationError("mace-mliap requires an ML-IAP *-mliap_lammps.pt model")
+        # Calphy launches each LAMMPS phase from a directory immediately below
+        # the CalcJob root, where AiiDA stages the provenance-tracked model.
+        pair_style = f"mliap unified ../{artifact.filename} 0"
+        pair_coeff = "* * " + " ".join(elements)
         spec = PotentialSpec(
             name=cls.NAME,
             artifact_key="model",
             artifact_filename=artifact.filename,
             elements=elements,
             pair_style=pair_style,
-            pair_coeff="* * " + " ".join(elements),
+            pair_coeff=pair_coeff,
             model_format=model_format,
         )
         return spec, artifact

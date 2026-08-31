@@ -11,7 +11,25 @@ from aiida.common.exceptions import ValidationError
 
 CPU_LAMMPS_CMDARGS: list[str] = []
 GPU_LAMMPS_CMDARGS = ["-k", "on", "g", "1", "-sf", "kk"]
-SAFE_LAMMPS_CMDARGS = (CPU_LAMMPS_CMDARGS, GPU_LAMMPS_CMDARGS)
+MLIAP_GPU_LAMMPS_CMDARGS = [
+    "-k",
+    "on",
+    "g",
+    "1",
+    "-sf",
+    "kk",
+    "-pk",
+    "kokkos",
+    "newton",
+    "on",
+    "neigh",
+    "half",
+]
+SAFE_LAMMPS_CMDARGS = (
+    CPU_LAMMPS_CMDARGS,
+    GPU_LAMMPS_CMDARGS,
+    MLIAP_GPU_LAMMPS_CMDARGS,
+)
 SHELL_METACHARACTERS = frozenset(";&|<>`$(){}[]*?!\\\"'")
 TM_PATTERN = re.compile(
     r"STATE:\s*Tm\s*=\s*(?P<temperature>\S+)\s*K\s*\+/-\s*(?P<uncertainty>\S+)\s*K"
@@ -47,9 +65,61 @@ def validate_lammps_cmdargs(arguments: list[Any]) -> str:
             raise ValidationError("LAMMPS argument tokens must not contain shell metacharacters")
     if arguments not in SAFE_LAMMPS_CMDARGS:
         raise ValidationError(
-            "supported lammps_cmdargs are [] or ['-k', 'on', 'g', '1', '-sf', 'kk']"
+            "supported lammps_cmdargs are [], "
+            "['-k', 'on', 'g', '1', '-sf', 'kk'], or the one-GPU ML-IAP "
+            "Kokkos argument list"
         )
     return shlex.join(arguments)
+
+
+CALPHY_FAILURE_PATTERNS = (
+    (
+        "lammps_style_unavailable",
+        (
+            "unrecognized pair style",
+            "unknown pair style",
+            "invalid pair style",
+            "is missing styles this calculation needs",
+        ),
+    ),
+    (
+        "melting_attempts_exhausted",
+        ("maximum number of tries reached", "failed to extrapolate melting temperature"),
+    ),
+    (
+        "calphy_input_rejected",
+        (
+            "validation error for calculation",
+            "pydantic_core._pydantic_core.validationerror",
+            "uses the legacy calphy input format",
+            "has no 'calculations:' list",
+            "unknown top-level key",
+            "input file input.yaml not found",
+        ),
+    ),
+    (
+        "lammps_runtime_failed",
+        (
+            "lammps segment failed:",
+            "lammps execution error",
+            "lammps reported an error",
+            "error: lost atoms",
+            "cuda error",
+            "segmentation fault",
+        ),
+    ),
+)
+
+
+def classify_calphy_failure(text: str) -> str | None:
+    """Classify known terminal Calphy/LAMMPS failures from retrieved diagnostics."""
+    lowered = text.lower()
+    for classification, patterns in CALPHY_FAILURE_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            return classification
+    if "traceback (most recent call last):" in lowered:
+        return "calphy_execution_failed"
+    return None
 
 
 def parse_temperature_log(text: str, n_iterations: int) -> dict[str, Any]:

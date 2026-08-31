@@ -6,6 +6,7 @@ from aiida.common.folders import SandboxFolder
 from aiida.engine.utils import instantiate_process
 
 from aiida_melting.calculations.calphy import CalphyCalculation
+from aiida_melting.calphy import MLIAP_GPU_LAMMPS_CMDARGS
 
 
 def make_code(computer, label, executable):
@@ -43,8 +44,10 @@ def prepare(aiida_manager, aiida_localhost, cmdargs=None, mace=False):
     lammps = make_code(aiida_localhost, "lammps", "/opt/lammps/bin/lmp")
     structure = orm.SinglefileData.from_bytes(b"LAMMPS data", filename="structure.data")
     if mace:
-        potential = orm.SinglefileData.from_bytes(b"model", filename="mace-medium-lammps.pt")
-        raw = parameters("mliap unified mace-medium-lammps.pt 0", "* * Cu")
+        potential = orm.SinglefileData.from_bytes(
+            b"model", filename="mace-medium-mliap_lammps.pt"
+        )
+        raw = parameters("mliap unified ../mace-medium-mliap_lammps.pt 0", "* * Cu")
     else:
         potential = orm.SinglefileData.from_bytes(b"eam", filename="Cu.eam")
         raw = parameters()
@@ -88,12 +91,14 @@ def test_one_gpu_mace_submission(aiida_profile_clean, aiida_manager, aiida_local
     folder, calcinfo, _calphy, _lammps, _structure, potential = prepare(
         aiida_manager,
         aiida_localhost,
-        cmdargs=["-k", "on", "g", "1", "-sf", "kk"],
+        cmdargs=MLIAP_GPU_LAMMPS_CMDARGS,
         mace=True,
     )
     with folder.open("input.yaml") as handle:
         calculation = yaml.safe_load(handle)["calculations"][0]
-    assert calculation["md"]["cmdargs"] == "-k on g 1 -sf kk"
-    assert calculation["pair_style"] == "mliap unified mace-medium-lammps.pt 0"
+    assert calculation["md"]["cmdargs"] == (
+        "-k on g 1 -sf kk -pk kokkos newton on neigh half"
+    )
+    assert calculation["pair_style"] == "mliap unified ../mace-medium-mliap_lammps.pt 0"
     assert calculation["pair_coeff"] == "* * Cu"
     assert (potential.uuid, potential.filename, potential.filename) in calcinfo.local_copy_list

@@ -11,6 +11,7 @@ from aiida.common import CalcInfo, CodeInfo
 from aiida.common.exceptions import InputValidationError
 from aiida.engine import CalcJob
 
+from ..calculators import RESERVED_ARTIFACT_FILENAMES
 from ..calphy import validate_lammps_cmdargs
 
 
@@ -71,6 +72,18 @@ class CalphyCalculation(CalcJob):
         spec.exit_code(
             304, "ERROR_PARSER_CORRUPTION", message="Calphy parser could not read retrieved output"
         )
+        spec.exit_code(305, "ERROR_CALPHY_INPUT_REJECTED", message="Calphy rejected its input")
+        spec.exit_code(
+            306,
+            "ERROR_LAMMPS_STYLE_UNAVAILABLE",
+            message="The configured LAMMPS executable lacks a required style",
+        )
+        spec.exit_code(307, "ERROR_LAMMPS_RUNTIME_FAILED", message="LAMMPS execution failed")
+        spec.exit_code(
+            308,
+            "ERROR_MELTING_ATTEMPTS_EXHAUSTED",
+            message="Calphy exhausted its melting-temperature attempts",
+        )
         spec.inputs.validator = cls.validate_inputs
 
     @staticmethod
@@ -93,6 +106,11 @@ class CalphyCalculation(CalcJob):
             and inputs["structure_data"].filename != "structure.data"
         ):
             return "structure_data must be named structure.data"
+        if (
+            inputs.get("potential") is not None
+            and inputs["potential"].filename in RESERVED_ARTIFACT_FILENAMES
+        ):
+            return f"potential filename {inputs['potential'].filename!r} is reserved"
         try:
             if inputs.get("lammps_cmdargs") is not None:
                 validate_lammps_cmdargs(inputs["lammps_cmdargs"].get_list())

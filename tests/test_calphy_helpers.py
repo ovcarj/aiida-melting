@@ -9,6 +9,8 @@ from aiida.common.exceptions import ValidationError
 from aiida_melting.calculators import EamCalculatorAdapter, MaceCalculatorAdapter
 from aiida_melting.calphy import (
     GPU_LAMMPS_CMDARGS,
+    MLIAP_GPU_LAMMPS_CMDARGS,
+    classify_calphy_failure,
     is_transient_calphy_failure,
     is_transient_transport_exception,
     parse_temperature_log,
@@ -64,21 +66,28 @@ def test_eam_adapter_rejections(metadata, files, message):
 
 @pytest.mark.usefixtures("aiida_profile_clean")
 def test_mace_adapter():
-    artifact = orm.SinglefileData.from_bytes(b"model", filename="mace-medium-lammps.pt")
+    model_format = "mace-mliap"
+    filename = "mace-medium-mliap_lammps.pt"
+    artifact = orm.SinglefileData.from_bytes(b"model", filename=filename)
     spec, returned = MaceCalculatorAdapter.translate(
-        calculator("mace", model_format="mace-lammps", elements=["Cu"]),
+        calculator("mace", model_format=model_format, elements=["Cu"]),
         {"model": artifact},
         ["Cu"],
     )
     assert returned is artifact
-    assert spec.pair_style == "mliap unified mace-medium-lammps.pt 0"
+    assert spec.pair_style == "mliap unified ../mace-medium-mliap_lammps.pt 0"
     assert spec.pair_coeff == "* * Cu"
 
 
 @pytest.mark.usefixtures("aiida_profile_clean")
 @pytest.mark.parametrize(
     ("filename", "model_format"),
-    [("raw.model", "mace-lammps"), ("model-lammps.pt", "torchscript")],
+    [
+        ("raw.model", "mace-mliap"),
+        ("model-mliap_lammps.pt", "mace-lammps"),
+        ("model-lammps.pt", "mace-mliap"),
+        ("model-lammps.pt", "torchscript"),
+    ],
 )
 def test_mace_adapter_rejects_unready_model(filename, model_format):
     artifact = orm.SinglefileData.from_bytes(b"model", filename=filename)
@@ -94,9 +103,44 @@ def test_pressure_and_arguments():
     assert pressure_gpa_to_bar(1.25) == 12500
     assert validate_lammps_cmdargs([]) == ""
     assert validate_lammps_cmdargs(GPU_LAMMPS_CMDARGS) == "-k on g 1 -sf kk"
+    assert validate_lammps_cmdargs(MLIAP_GPU_LAMMPS_CMDARGS) == (
+        "-k on g 1 -sf kk -pk kokkos newton on neigh half"
+    )
     for invalid in (["-in", "job"], ["-k", "on", "g", "2", "-sf", "kk"], ["x y"], [";"]):
         with pytest.raises(ValidationError):
             validate_lammps_cmdargs(invalid)
+
+
+@pytest.mark.parametrize(
+    ("text", "classification"),
+    [
+        ("ValidationError: validation error for Calculation", "calphy_input_rejected"),
+        ("ERROR: Unrecognized pair style 'mace'", "lammps_style_unavailable"),
+        (
+            "calphy.errors.LammpsExecutionError: LAMMPS segment failed: exited",
+            "lammps_runtime_failed",
+        ),
+        ("ValueError: Maximum number of tries reached", "melting_attempts_exhausted"),
+        ("Traceback (most recent call last):\nRuntimeError: unexpected", "calphy_execution_failed"),
+        ("STATE: Tm = 1350 K +/- 2 K", None),
+    ],
+)
+def test_failure_classification(text, classification):
+    assert classify_calphy_failure(text) == classification
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+@pytest.mark.parametrize(
+    "filename", ["input.yaml", "structure.data", "calphy.stdout", "_aiidasubmit.sh"]
+)
+def test_adapter_rejects_reserved_artifact_filenames(filename):
+    artifact = orm.SinglefileData.from_bytes(b"eam", filename=filename)
+    with pytest.raises(ValidationError, match="reserved"):
+        EamCalculatorAdapter.translate(
+            calculator("eam", pair_style="eam", elements=["Cu"]),
+            {"potential": artifact},
+            ["Cu"],
+        )
 
 
 def test_temperature_parser_semantics():

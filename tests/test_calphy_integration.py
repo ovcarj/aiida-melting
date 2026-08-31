@@ -8,6 +8,7 @@ import pytest
 from aiida import orm
 from aiida.engine import run_get_node
 
+from aiida_melting.calphy import MLIAP_GPU_LAMMPS_CMDARGS
 from aiida_melting.workflows.dispatcher import MeltingWorkChain
 
 pytestmark = pytest.mark.integration
@@ -90,15 +91,15 @@ def test_real_cu_eam_twice():
 def test_real_cu_mace_mpa_0_medium_one_gpu():
     configuration = _configuration("AIIDA_MELTING_MACE_MPA_0_MEDIUM_MODEL")
     artifact = orm.SinglefileData(file=Path(configuration["artifact"]))
-    assert artifact.filename.endswith("lammps.pt")
+    assert artifact.filename.endswith("-mliap_lammps.pt")
     calculator = {
         "metadata": orm.Dict(
             dict={
                 "name": "mace",
                 "provides": ["energy", "forces", "stress"],
-                "metadata": {"model_format": "mace-lammps", "elements": ["Cu"]},
+                "metadata": {"model_format": "mace-mliap", "elements": ["Cu"]},
             }
         ),
         "files": {"model": artifact},
     }
-    _run(configuration, calculator, ["-k", "on", "g", "1", "-sf", "kk"])
+    _run(configuration, calculator, MLIAP_GPU_LAMMPS_CMDARGS)

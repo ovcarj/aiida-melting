@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from copy import deepcopy
+from typing import ClassVar
 
 from aiida import orm
 from aiida.common.exceptions import ValidationError
@@ -18,8 +19,9 @@ from aiida.engine import (
 )
 
 from ..calculations.calphy import CalphyCalculation
-from ..calculators import get_calculator_adapter
+from ..calculators import MaceCalculatorAdapter, get_calculator_adapter
 from ..calphy import (
+    MLIAP_GPU_LAMMPS_CMDARGS,
     is_transient_calphy_failure,
     is_transient_transport_exception,
     pressure_gpa_to_bar,
@@ -35,7 +37,7 @@ from ..contracts import (
 from ..structures_calphy import prepare_supercell, validate_calphy_structure
 
 METHOD_VERSION = "1"
-CALPHY_VERSION = "2.0.1"
+TARGET_CALPHY_VERSION = "2.0.1"
 
 
 def _positive(value, name: str) -> float:
@@ -86,7 +88,7 @@ def create_calphy_report(
         dict={
             "method": "melting.calphy",
             "method_version": METHOD_VERSION,
-            "calphy_version": CALPHY_VERSION,
+            "target_calphy_version": TARGET_CALPHY_VERSION,
             "units": {"melting_temperature": "K", "pressure": "GPa"},
             "composition": normalize_composition(composition),
             "pressure": pressure.value,
@@ -129,6 +131,16 @@ class CalphyCalculationWorkChain(BaseRestartWorkChain):
     """Retry a complete Calphy job only after a classified transient failure."""
 
     _process_class = CalphyCalculation
+    _terminal_exit_labels: ClassVar[dict[int, str]] = {
+        300: "ERROR_CALPHY_EXECUTION_FAILED",
+        302: "ERROR_MALFORMED_TEMPERATURE",
+        303: "ERROR_INVALID_TEMPERATURE",
+        304: "ERROR_PARSER_CORRUPTION",
+        305: "ERROR_CALPHY_INPUT_REJECTED",
+        306: "ERROR_LAMMPS_STYLE_UNAVAILABLE",
+        307: "ERROR_LAMMPS_RUNTIME_FAILED",
+        308: "ERROR_MELTING_ATTEMPTS_EXHAUSTED",
+    }
 
     @classmethod
     def define(cls, spec) -> None:
@@ -139,6 +151,28 @@ class CalphyCalculationWorkChain(BaseRestartWorkChain):
             cls.setup,
             while_(cls.should_run_process)(cls.run_process, cls.inspect_process),
             cls.results,
+        )
+        spec.exit_code(300, "ERROR_CALPHY_EXECUTION_FAILED", message="Calphy execution failed")
+        spec.exit_code(
+            302, "ERROR_MALFORMED_TEMPERATURE", message="Malformed Calphy temperature output"
+        )
+        spec.exit_code(
+            303, "ERROR_INVALID_TEMPERATURE", message="Invalid Calphy temperature output"
+        )
+        spec.exit_code(
+            304, "ERROR_PARSER_CORRUPTION", message="Calphy parser could not read retrieved output"
+        )
+        spec.exit_code(305, "ERROR_CALPHY_INPUT_REJECTED", message="Calphy rejected its input")
+        spec.exit_code(
+            306,
+            "ERROR_LAMMPS_STYLE_UNAVAILABLE",
+            message="The configured LAMMPS executable lacks a required style",
+        )
+        spec.exit_code(307, "ERROR_LAMMPS_RUNTIME_FAILED", message="LAMMPS execution failed")
+        spec.exit_code(
+            308,
+            "ERROR_MELTING_ATTEMPTS_EXHAUSTED",
+            message="Calphy exhausted its melting-temperature attempts",
         )
 
     def setup(self) -> None:
@@ -160,6 +194,9 @@ class CalphyCalculationWorkChain(BaseRestartWorkChain):
                 return self.exit_codes.ERROR_MAXIMUM_ITERATIONS_EXCEEDED
             self.report(f"retrying transient transport failure from {node.pk}")
             return None
+        if node.is_failed and node.exit_status in self._terminal_exit_labels:
+            label = self._terminal_exit_labels[node.exit_status]
+            return getattr(self.exit_codes, label)
         return super().inspect_process()
 
 
@@ -261,6 +298,13 @@ class CalphyMeltingWorkChain(BaseMeltingWorkChain):
             )
             self.ctx.potential = potential
             self.ctx.artifact = artifact
+            if (
+                potential.model_format == MaceCalculatorAdapter.MODEL_FORMAT
+                and params.lammps_cmdargs.get_list() != MLIAP_GPU_LAMMPS_CMDARGS
+            ):
+                raise ValidationError(
+                    "mace-mliap requires the supported one-GPU ML-IAP Kokkos arguments"
+                )
         except Exception as exception:
             return self.exit_codes.ERROR_INVALID_INPUT.format(reason=str(exception))
         return None

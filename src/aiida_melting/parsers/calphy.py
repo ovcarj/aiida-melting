@@ -5,15 +5,21 @@ from __future__ import annotations
 from aiida import orm
 from aiida.parsers import Parser
 
-from ..calphy import parse_temperature_log
+from ..calphy import classify_calphy_failure, parse_temperature_log
+
+FAILURE_EXIT_CODES = {
+    "calphy_execution_failed": "ERROR_CALPHY_EXECUTION_FAILED",
+    "calphy_input_rejected": "ERROR_CALPHY_INPUT_REJECTED",
+    "lammps_style_unavailable": "ERROR_LAMMPS_STYLE_UNAVAILABLE",
+    "lammps_runtime_failed": "ERROR_LAMMPS_RUNTIME_FAILED",
+    "melting_attempts_exhausted": "ERROR_MELTING_ATTEMPTS_EXHAUSTED",
+}
 
 
 class CalphyParser(Parser):
     """Parse Calphy's final state record and retain compact diagnostics."""
 
     def parse(self, **kwargs):
-        if self.node.exit_status is not None and self.node.exit_status > 0:
-            return self.node.exit_code
         try:
             repository = self.retrieved.base.repository
             inventory = sorted(
@@ -22,25 +28,38 @@ class CalphyParser(Parser):
                 for filename in filenames
             )
         except Exception:
+            if self.node.exit_status is not None and self.node.exit_status > 0:
+                return self.node.exit_code
+            return self.exit_codes.ERROR_INCOMPLETE_RETRIEVAL
+
+        diagnostic_paths = [
+            path
+            for path in inventory
+            if path.endswith((".log", ".out", ".err"))
+            or path in {"calphy.stdout", "calphy.stderr"}
+        ]
+        diagnostics_by_path: list[tuple[str, str]] = []
+        try:
+            for path in diagnostic_paths:
+                with repository.open(path, "r") as handle:
+                    diagnostics_by_path.append((path, handle.read()))
+        except (OSError, UnicodeError):
+            return self.exit_codes.ERROR_PARSER_CORRUPTION
+
+        diagnostic_text = "\n".join(text for _path, text in diagnostics_by_path)
+        if classification := classify_calphy_failure(diagnostic_text):
+            return getattr(self.exit_codes, FAILURE_EXIT_CODES[classification])
+        if self.node.exit_status is not None and self.node.exit_status > 0:
+            return self.node.exit_code
+        if "input.yaml" not in inventory:
             return self.exit_codes.ERROR_INCOMPLETE_RETRIEVAL
 
         log_files = [path for path in inventory if path.endswith(".log")]
         if not log_files:
-            if "calphy.stderr" in inventory:
-                try:
-                    with repository.open("calphy.stderr", "r") as handle:
-                        if handle.read().strip():
-                            return self.exit_codes.ERROR_CALPHY_EXECUTION_FAILED
-                except (OSError, UnicodeError):
-                    return self.exit_codes.ERROR_PARSER_CORRUPTION
+            if diagnostic_text.strip():
+                return self.exit_codes.ERROR_CALPHY_EXECUTION_FAILED
             return self.exit_codes.ERROR_INCOMPLETE_RETRIEVAL
-        contents: list[tuple[str, str]] = []
-        try:
-            for path in log_files:
-                with repository.open(path, "r") as handle:
-                    contents.append((path, handle.read()))
-        except (OSError, UnicodeError):
-            return self.exit_codes.ERROR_PARSER_CORRUPTION
+        contents = [(path, text) for path, text in diagnostics_by_path if path.endswith(".log")]
         candidates = [(path, text) for path, text in contents if "STATE: Tm =" in text]
         if not candidates:
             return self.exit_codes.ERROR_MALFORMED_TEMPERATURE
