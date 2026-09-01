@@ -1,0 +1,4 @@
+# Time-averaged data for fix 2
+# TimeStep lx[A] ly[A] lz[A] press[bar] pe[eV/atom] etotal[eV/atom] temp[K]
+20100 30.1062 30.1062 30.1062 72.8853 -3.22395 -3.05804 1284.19
+20200 30.0888 30.0888 30.0888 -183.377 -3.22873 -3.06471 1269.51
