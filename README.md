@@ -18,6 +18,13 @@ and `aiida-core>=2.9,<3` are required.
 python -m pip install -e '.[dev]'
 ```
 
+For read-only result tables and figures in a regular installation, install the
+optional analysis dependencies:
+
+```console
+python -m pip install -e '.[analysis]'
+```
+
 The package registers `melting.calculate`, `melting.mock`, and `melting.calphy`
 in the `aiida.workflows` entry-point group. It also registers the
 `melting.calphy` calculation and parser entry points. Inspect the installation
