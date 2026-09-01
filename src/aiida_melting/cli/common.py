@@ -5,6 +5,7 @@ import json
 import click
 
 from ..api import get_common_inputs, get_method_inputs, list_melting_methods
+from .analysis import add_analysis_commands
 
 
 @click.command("methods")
@@ -31,3 +32,4 @@ def add_commands(group) -> None:
     """Attach the shared command set to a Click group."""
     group.add_command(methods_command)
     group.add_command(inputs_command)
+    add_analysis_commands(group)

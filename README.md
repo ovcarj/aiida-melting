@@ -1,6 +1,31 @@
 # aiida-melting
 
-`aiida-melting` 0.2.1 is an MIT-licensed, extensible AiiDA framework for
+## Analysis
+
+Version 0.3 adds read-only postprocessing for completed melting workflows.  It
+does not submit calculations, alter provenance, or retrieve trajectories that
+were not retained by the calculation.
+
+The existing command groups expose result queries, diagnostics, and figures.
+`results` emits a terminal table, CSV, or JSON and filters by element, pressure,
+method, calculator, artifact SHA-256, and scientific status. The artifact hash
+is the reliable potential/model identity. A result record also keeps the input
+structure caching hash, which identifies node content but is not a
+crystallographic-equivalence fingerprint.
+
+The Calphy tools work from the retrieved `FolderData` attached to a process
+and expose the same readers for an exported retrieved directory.  Available
+figures cover block-averaged equilibration, reference switching, reversible
+temperature scaling, free-energy curves, adaptive attempts, and a compact
+overview.  Their diagnostics report measured values and explicit Calphy log
+warnings; they deliberately do not manufacture a pass/fail scientific grade.
+
+For switching files with more than one reference term, the raw traces remain
+available but the reader does not infer a combined integrand without explicit
+reference weights.  This avoids silently misrepresenting multicomponent free
+energy paths.
+
+`aiida-melting` 0.3.0 is an MIT-licensed, extensible AiiDA framework for
 melting-temperature workflows. It requires Python 3.11 or newer and
 `aiida-core>=2.9,<3`.
 
