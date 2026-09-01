@@ -1,0 +1,165 @@
+"""Read Calphy's retrieved text files into analysis data objects."""
+
+from __future__ import annotations
+
+import re
+import shutil
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import yaml
+from aiida import orm
+
+from .data import AttemptData, CalphyAnalysis, PhaseData, SwitchingData, TableData
+
+_STATE = re.compile(r"STATE:\s*Tm\s*=\s*([-+0-9.eE]+)\s*K(?:\s*\+/-\s*([-+0-9.eE]+)\s*K)?")
+_PHASE = re.compile(r"(?P<phase>solid|liquid)-(?P<temperature>[-+0-9.]+)-(?P<attempt>\d+)$")
+_REPLICA = re.compile(r"(?:ts\.)?(forward|backward)_(\d+)\.dat$")
+
+
+def _yaml(path: Path) -> dict:
+    try:
+        payload = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _table(path: Path) -> TableData | None:
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return None
+    header = next((line[1:].strip() for line in lines if line.startswith("#")), "")
+    columns = tuple(header.split())
+    try:
+        values = np.loadtxt(path, comments="#", ndmin=2)
+    except (OSError, ValueError):
+        return None
+    if values.size == 0:
+        return None
+    return TableData(columns=columns, values=np.asarray(values, dtype=float), source=str(path))
+
+
+def _integrand(table: TableData) -> tuple[np.ndarray, np.ndarray | None]:
+    columns = [column.lower() for column in table.columns]
+    lambda_index = next((i for i, column in enumerate(columns) if "lambda" in column), None)
+    if lambda_index is None:
+        lambda_index = table.values.shape[1] - 1
+    lambdas = table.values[:, lambda_index]
+    system = next((i for i, column in enumerate(columns) if "du_sys" in column), None)
+    references = [i for i, column in enumerate(columns) if "du_ref" in column]
+    if system is None or len(references) != 1:
+        return lambdas, None
+    return lambdas, table.values[:, system] - table.values[:, references[0]]
+
+
+def _switches(directory: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
+    records: list[SwitchingData] = []
+    for path in sorted(directory.glob(f"{prefix}*.dat")):
+        if not prefix and path.name.startswith("ts."):
+            continue
+        match = _REPLICA.search(path.name)
+        if match is None:
+            continue
+        table = _table(path)
+        if table is None:
+            continue
+        lambdas, integrand = _integrand(table)
+        records.append(SwitchingData(match[1], int(match[2]), lambdas, integrand, table))
+    return tuple(records)
+
+
+def _phase(directory: Path, name: str) -> PhaseData:
+    files = tuple(
+        str(path.relative_to(directory)) for path in sorted(directory.rglob("*")) if path.is_file()
+    )
+    return PhaseData(
+        name=name,
+        directory=str(directory),
+        report=_yaml(directory / "report.yaml"),
+        equilibration=_table(directory / "avg.dat"),
+        switching=_switches(directory),
+        temperature_scaling=_switches(directory, "ts."),
+        free_energy=_table(directory / "temperature_sweep.dat"),
+        files=files,
+    )
+
+
+def read_calphy_directory(path: str | Path) -> CalphyAnalysis:
+    """Read a local directory containing the retrieved output of one CalcJob."""
+    root = Path(path)
+    if not root.is_dir():
+        raise ValueError(f"Calphy result directory does not exist: {root}")
+    files = tuple(str(item.relative_to(root)) for item in sorted(root.rglob("*")) if item.is_file())
+    logs = [item for item in root.glob("*.log") if item.is_file()]
+    log_records: list[str] = []
+    temperature = uncertainty = None
+    for log in logs:
+        content = log.read_text(errors="replace")
+        log_records.extend(
+            line for line in content.splitlines() if "STATE:" in line or "WARNING" in line
+        )
+        for match in _STATE.finditer(content):
+            candidate = float(match[1])
+            if np.isfinite(candidate) and candidate > 0:
+                temperature = candidate
+                uncertainty = float(match[2]) if match[2] is not None else None
+    grouped: dict[str, dict[str, PhaseData]] = {}
+    for directory in sorted(root.iterdir()):
+        if not directory.is_dir():
+            continue
+        match = _PHASE.search(directory.name)
+        if match is None:
+            continue
+        key = f"{match['temperature']}-{match['attempt']}"
+        grouped.setdefault(key, {})[match["phase"]] = _phase(directory, match["phase"])
+    attempts = []
+    for key, phases in grouped.items():
+        attempts.append(
+            AttemptData(
+                key=key,
+                temperature_hint_k=float(key.rsplit("-", 1)[0]),
+                solid=phases.get("solid"),
+                liquid=phases.get("liquid"),
+            )
+        )
+    return CalphyAnalysis(
+        root=str(root),
+        input_parameters=_yaml(root / "input.yaml"),
+        attempts=tuple(attempts),
+        melting_temperature_k=temperature,
+        uncertainty_k=uncertainty
+        if uncertainty and np.isfinite(uncertainty) and uncertainty > 0
+        else None,
+        log_records=tuple(log_records),
+        files=files,
+    )
+
+
+def read_calphy_retrieved(folder: orm.FolderData) -> CalphyAnalysis:
+    """Read an AiiDA retrieved FolderData without requiring manual export."""
+    with tempfile.TemporaryDirectory(prefix="aiida-melting-calphy-") as temporary:
+        root = Path(temporary)
+        for directory, _, object_names in folder.base.repository.walk():
+            for object_name in object_names:
+                relative = Path(directory) / object_name
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with folder.base.repository.open(str(relative), "rb") as source:
+                    with target.open("wb") as destination:
+                        shutil.copyfileobj(source, destination)
+        return read_calphy_directory(root)
+
+
+def read_calphy_process(identifier: int | str | orm.ProcessNode) -> CalphyAnalysis:
+    """Read the retrieved folder of a CalcJob, method workflow, or dispatcher."""
+    node = orm.load_node(identifier) if not isinstance(identifier, orm.ProcessNode) else identifier
+    if isinstance(node, orm.CalcJobNode) and "retrieved" in node.outputs:
+        return read_calphy_retrieved(node.outputs.retrieved)
+    descendants = node.called_descendants if isinstance(node, orm.ProcessNode) else []
+    for descendant in reversed(descendants):
+        if isinstance(descendant, orm.CalcJobNode) and "retrieved" in descendant.outputs:
+            return read_calphy_retrieved(descendant.outputs.retrieved)
+    raise ValueError(f"No retrieved Calphy CalcJob was found below process {node.pk}.")

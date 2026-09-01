@@ -4,14 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aiida-melting"
-version = "0.2.1"
+version = "0.3.0"
 description = "An extensible AiiDA framework for melting-temperature workflows"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Juraj Ovčar" }]
-dependencies = ["aiida-core>=2.9,<3", "ase>=3.23", "PyYAML>=6"]
+dependencies = [
+    "aiida-core>=2.9,<3",
+    "ase>=3.23",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "PyYAML>=6",
+]
 
 [project.optional-dependencies]
 dev = ["build>=1", "pytest>=8", "ruff>=0.9"]
@@ -46,3 +53,4 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "RUF"]
+ignore = ["E501"]
