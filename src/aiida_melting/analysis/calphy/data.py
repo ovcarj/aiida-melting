@@ -22,6 +22,7 @@ class SwitchingData:
     """One forward or backward reference-switching replica."""
 
     direction: str
+    leg: str | None
     replica: int
     lambda_values: NDArray[np.float64]
     integrand: NDArray[np.float64] | None

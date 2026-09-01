@@ -6,6 +6,7 @@ from pathlib import Path
 
 import matplotlib
 import pytest
+from aiida import orm
 
 matplotlib.use("Agg")
 
@@ -19,6 +20,7 @@ from aiida_melting.analysis.calphy.plots import (
     plot_temperature_sweeps,
 )
 from aiida_melting.analysis.calphy.reader import _table, read_calphy_directory
+from aiida_melting.analysis.query import _structure_composition
 
 
 def _write(path: Path, content: str) -> None:
@@ -119,6 +121,34 @@ def test_retrieved_style_sources_are_relative_to_analysis_root(tmp_path: Path) -
     assert result.attempts[0].solid is not None
     assert result.attempts[0].solid.equilibration is not None
     assert result.attempts[0].solid.equilibration.source == "ts-structure.data-solid-1000-0/avg.dat"
+
+
+def test_reader_keeps_binary_switching_legs_and_sums_reference_terms(tmp_path: Path) -> None:
+    directory = tmp_path / "ts-structure.data-liquid-1000-0"
+    _write(
+        directory / "forward_leg1_1.dat",
+        "# dU_sys dU_ref1 dU_ref2 lambda\n10 3 2 0\n12 4 1 1\n",
+    )
+    _write(
+        directory / "backward_leg2_1.dat",
+        "# dU_sys dU_ref lambda\n8 3 1\n",
+    )
+    result = read_calphy_directory(tmp_path)
+    liquid = result.attempts[0].liquid
+    assert liquid is not None
+    records = liquid.switching
+    assert [(record.direction, record.leg, record.replica) for record in records] == [
+        ("backward", "leg2", 1),
+        ("forward", "leg1", 1),
+    ]
+    assert records[1].integrand.tolist() == [5.0, 7.0]
+
+
+def test_structure_composition_accepts_fractional_kind_weights() -> None:
+    structure = orm.StructureData(cell=[[3, 0, 0], [0, 3, 0], [0, 0, 3]])
+    structure.append_atom(position=(0, 0, 0), symbols=("In", "As"), weights=(0.5, 0.5))
+    assert _structure_composition(structure) == {"As": 0.5, "In": 0.5}
+    assert structure.get_formula()
 
 
 def test_all_calphy_plots_render_for_complete_data(tmp_path: Path) -> None:

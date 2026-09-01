@@ -225,6 +225,9 @@ def test_calphy_dispatcher_end_to_end(aiida_localhost, tmp_path):
     assert analysis.attempts
     assert analysis.attempts[0].solid is not None
     assert analysis.attempts[0].solid.equilibration is not None
+    assert "aiida-melting-calphy-" not in analysis.root
+    assert analysis.root.startswith("aiida://")
+    assert analysis.attempts[0].solid.directory.startswith(analysis.root)
     assert "aiida-melting-calphy-" not in analysis.attempts[0].solid.equilibration.source
 
     runner = CliRunner()

@@ -60,7 +60,9 @@ def _plot_switches(axis, records: tuple[SwitchingData, ...], title: str) -> None
             record.lambda_values,
             record.integrand,
             alpha=0.65,
-            label=f"{record.direction} {record.replica}",
+            label=" ".join(
+                str(value) for value in (record.direction, record.leg, record.replica) if value is not None
+            ),
         )
     axis.set_title(title)
     axis.set_xlabel("lambda")

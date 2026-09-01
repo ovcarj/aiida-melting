@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
-from math import gcd
 from typing import Any
 
 from aiida import orm
@@ -15,19 +14,7 @@ from .records import ResultRecord
 DISPATCHER_PROCESS_TYPE = "aiida.workflows:melting.calculate"
 
 
-def _formula(composition: dict[str, int]) -> str | None:
-    if not composition:
-        return None
-    divisor = 0
-    for amount in composition.values():
-        divisor = amount if divisor == 0 else gcd(divisor, amount)
-    return "".join(
-        element + ("" if amount // divisor == 1 else str(amount // divisor))
-        for element, amount in sorted(composition.items())
-    )
-
-
-def _structure_composition(structure: orm.StructureData | None) -> dict[str, int]:
+def _structure_composition(structure: orm.StructureData | None) -> dict[str, float]:
     if structure is None:
         return {}
     composition: Counter[str] = Counter()
@@ -90,7 +77,7 @@ def _record(node: orm.ProcessNode) -> ResultRecord | None:
         process_pk=node.pk,
         process_uuid=str(node.uuid),
         ctime=node.ctime.isoformat(),
-        formula=_formula(composition),
+        formula=input_structure.get_formula() if input_structure is not None else None,
         composition=composition,
         elements=tuple(sorted(composition)),
         pressure_gpa=float(pressure_gpa) if pressure_gpa is not None else None,

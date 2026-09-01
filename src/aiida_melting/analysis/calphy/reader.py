@@ -18,7 +18,9 @@ _NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 _PHASE = re.compile(
     rf"^(?P<prefix>ts-.+)-(?P<phase>solid|liquid)-(?P<temperature>{_NUMBER})-(?P<pressure>{_NUMBER})$"
 )
-_REPLICA = re.compile(r"(?:ts\.)?(forward|backward)_(\d+)\.dat$")
+_REPLICA = re.compile(
+    r"(?:ts\.)?(?P<direction>forward|backward)(?:_(?P<leg>leg\d+))?_(?P<replica>\d+)\.dat$"
+)
 _RANGE = re.compile(
     r"(?:STATE:\s*)?Temperature range of\s+([-+0-9.eE]+)\s*-\s*([-+0-9.eE]+)\s*K?"
 )
@@ -67,9 +69,12 @@ def _integrand(table: TableData) -> tuple[np.ndarray, np.ndarray | None]:
     lambdas = table.values[:, lambda_index]
     system = next((i for i, column in enumerate(columns) if "du_sys" in column), None)
     references = [i for i, column in enumerate(columns) if "du_ref" in column]
-    if system is None or len(references) != 1:
+    if system is None or not references:
         return lambdas, None
-    return lambdas, table.values[:, system] - table.values[:, references[0]]
+    # A Calphy leg switches between the system Hamiltonian and the complete
+    # reference Hamiltonian. When the latter is decomposed into several
+    # ``dU_ref*`` terms, its energy is their sum.
+    return lambdas, table.values[:, system] - table.values[:, references].sum(axis=1)
 
 
 def _switches(directory: Path, root: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
@@ -84,17 +89,28 @@ def _switches(directory: Path, root: Path, prefix: str = "") -> tuple[SwitchingD
         if table is None:
             continue
         lambdas, integrand = _integrand(table)
-        records.append(SwitchingData(match[1], int(match[2]), lambdas, integrand, table))
+        records.append(
+            SwitchingData(
+                match["direction"],
+                match["leg"],
+                int(match["replica"]),
+                lambdas,
+                integrand,
+                table,
+            )
+        )
     return tuple(records)
 
 
-def _phase(directory: Path, root: Path, name: str) -> PhaseData:
+def _phase(directory: Path, root: Path, name: str, source_root: str | None = None) -> PhaseData:
     files = tuple(
         str(path.relative_to(directory)) for path in sorted(directory.rglob("*")) if path.is_file()
     )
     return PhaseData(
         name=name,
-        directory=str(directory),
+        directory=(
+            f"{source_root}/{directory.relative_to(root)}" if source_root is not None else str(directory)
+        ),
         report=_yaml(directory / "report.yaml"),
         equilibration=_table(directory / "avg.dat", source=str((directory / "avg.dat").relative_to(root))),
         switching=_switches(directory, root),
@@ -107,7 +123,7 @@ def _phase(directory: Path, root: Path, name: str) -> PhaseData:
     )
 
 
-def read_calphy_directory(path: str | Path) -> CalphyAnalysis:
+def read_calphy_directory(path: str | Path, *, source_root: str | None = None) -> CalphyAnalysis:
     """Read a local directory containing the retrieved output of one CalcJob."""
     root = Path(path)
     if not root.is_dir():
@@ -165,7 +181,9 @@ def read_calphy_directory(path: str | Path) -> CalphyAnalysis:
                 else None,
             },
         )
-        group["phases"][match["phase"]] = _phase(directory, root, match["phase"])
+        group["phases"][match["phase"]] = _phase(
+            directory, root, match["phase"], source_root=source_root
+        )
 
     def attempt_order(item: tuple[str, dict[str, object]]) -> tuple[int, float, str]:
         key, values = item
@@ -191,7 +209,7 @@ def read_calphy_directory(path: str | Path) -> CalphyAnalysis:
             )
         )
     return CalphyAnalysis(
-        root=str(root),
+        root=source_root or str(root),
         input_parameters=_yaml(root / "input.yaml"),
         attempts=tuple(attempts),
         melting_temperature_k=temperature,
@@ -215,7 +233,7 @@ def read_calphy_retrieved(folder: orm.FolderData) -> CalphyAnalysis:
                 with folder.base.repository.open(str(relative), "rb") as source:
                     with target.open("wb") as destination:
                         shutil.copyfileobj(source, destination)
-        return read_calphy_directory(root)
+        return read_calphy_directory(root, source_root=f"aiida://{folder.uuid}")
 
 
 def read_calphy_process(identifier: int | str | orm.ProcessNode) -> CalphyAnalysis:

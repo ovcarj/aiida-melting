@@ -14,7 +14,7 @@ class ResultRecord:
     process_uuid: str
     ctime: str
     formula: str | None
-    composition: dict[str, int]
+    composition: dict[str, float]
     elements: tuple[str, ...]
     pressure_gpa: float | None
     method: str | None
