@@ -1,40 +1,16 @@
 # aiida-melting
 
-## Analysis
+`aiida-melting` is an extensible AiiDA framework for reproducible
+melting-temperature workflows. It provides a common interface for submitting
+calculations, retaining their scientific inputs and outputs in provenance, and
+comparing completed results.
 
-Version 0.3 adds read-only postprocessing for completed melting workflows.  It
-does not submit calculations, alter provenance, or retrieve trajectories that
-were not retained by the calculation.
-
-The existing command groups expose result queries, diagnostics, and figures.
-`results` emits a terminal table, CSV, or JSON and filters by element, pressure,
-method, calculator, artifact SHA-256, and scientific status. The artifact hash
-is the reliable potential/model identity. A result record also keeps the input
-structure caching hash, which identifies node content but is not a
-crystallographic-equivalence fingerprint.
-
-The Calphy tools work from the retrieved `FolderData` attached to a process
-and expose the same readers for an exported retrieved directory.  Available
-figures cover block-averaged equilibration, reference switching, reversible
-temperature scaling, free-energy curves, adaptive attempts, and a compact
-overview.  Their diagnostics report measured values and explicit Calphy log
-warnings; they deliberately do not manufacture a pass/fail scientific grade.
-
-For switching files with more than one reference term, the raw traces remain
-available but the reader does not infer a combined integrand without explicit
-reference weights.  This avoids silently misrepresenting multicomponent free
-energy paths.
-
-`aiida-melting` 0.3.0 is an MIT-licensed, extensible AiiDA framework for
-melting-temperature workflows. It requires Python 3.11 or newer and
-`aiida-core>=2.9,<3`.
-
-The package provides the framework, a deterministic mock workflow, and a direct
-integration targeting Calphy 2.0.1. It supports EAM and the ML-IAP unified MACE
-interface with externally converted `*-mliap_lammps.pt` models. The original
-LAMMPS `pair_style mace` interface is intentionally not supported. One-GPU
-ML-IAP runtime compatibility has been validated. Materials Project retrieval
-and implicit model download/conversion are not implemented.
+The package includes a deterministic mock workflow and a direct Calphy 2.0.1
+integration. The Calphy workflow supports EAM potentials and the ML-IAP unified
+MACE interface with externally converted `*-mliap_lammps.pt` models. The
+original LAMMPS `pair_style mace` interface, Materials Project retrieval, and
+implicit model download or conversion are not implemented. Python 3.11 or newer
+and `aiida-core>=2.9,<3` are required.
 
 ## Installation
 
@@ -166,6 +142,31 @@ assert results["melting_temperature"].value == 2300.0
 
 The mock simply echoes its temperature parameter, normalizes composition in its
 report, reports kelvin units, and adds an explicit non-scientific warning.
+
+## Analysis
+
+The read-only analysis tools work with completed melting workflows: they do not
+submit calculations, alter provenance, or retrieve trajectories that the
+calculation did not retain.
+
+The command groups expose result queries, diagnostics, and figures. `results`
+emits a terminal table, CSV, or JSON and filters by element, pressure, method,
+calculator, artifact SHA-256, and scientific status. The artifact hash is the
+reliable potential or model identity. A result record also keeps the input
+structure caching hash, which identifies node content but is not a
+crystallographic-equivalence fingerprint.
+
+The Calphy tools read the retrieved `FolderData` attached to a process and can
+also read an exported retrieved directory. Available figures cover
+block-averaged equilibration, reference switching, reversible temperature
+scaling, free-energy curves, adaptive attempts, and a compact overview. Their
+diagnostics report measured values and explicit Calphy log warnings; they do not
+manufacture a pass/fail scientific grade.
+
+For switching files with more than one reference term, the raw traces remain
+available but the reader does not infer a combined integrand without explicit
+reference weights. This avoids silently misrepresenting multicomponent free
+energy paths.
 
 ## Adding a method
 
