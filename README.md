@@ -184,6 +184,8 @@ Discovery is dynamic: no dispatcher or registry edit is needed. The included
 Calphy implementation follows this pattern and is documented in
 [docs/calphy.md](docs/calphy.md).
 
+The direct-Calphy isotropic supercell wrapper is documented in [docs/convergence.md](docs/convergence.md).
+
 The public helpers `list_melting_methods()`, `get_melting_workflow(identifier)`,
 `get_common_inputs()`, and `get_method_inputs(identifier)` support programmatic
 discovery and introspection.

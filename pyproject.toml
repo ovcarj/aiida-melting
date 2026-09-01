@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aiida-melting"
-version = "0.3.0"
+version = "0.4.0"
 description = "An extensible AiiDA framework for melting-temperature workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,7 @@ dev = ["build>=1", "matplotlib>=3.8", "pandas>=2.1", "pytest>=8", "ruff>=0.9"]
 "melting.calculate" = "aiida_melting.workflows.dispatcher:MeltingWorkChain"
 "melting.mock" = "aiida_melting.workflows.mock:MockMeltingWorkChain"
 "melting.calphy" = "aiida_melting.workflows.calphy:CalphyMeltingWorkChain"
+"melting.supercell_convergence" = "aiida_melting.workflows.convergence:SupercellConvergenceWorkChain"
 
 [project.entry-points."aiida.calculations"]
 "melting.calphy" = "aiida_melting.calculations.calphy:CalphyCalculation"
