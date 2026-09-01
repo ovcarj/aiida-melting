@@ -48,6 +48,7 @@ class AttemptData:
 
     key: str
     temperature_hint_k: float | None
+    temperature_range_k: tuple[float, float] | None
     solid: PhaseData | None
     liquid: PhaseData | None
 

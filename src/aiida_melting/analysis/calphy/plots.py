@@ -166,6 +166,9 @@ def plot_attempt_history(data: CalphyAnalysis):
     x = np.arange(1, len(data.attempts) + 1)
     temperatures = [attempt.temperature_hint_k for attempt in data.attempts]
     axis.plot(x, temperatures, marker="o", label="candidate temperature")
+    for index, attempt in enumerate(data.attempts, start=1):
+        if attempt.temperature_range_k is not None:
+            axis.vlines(index, *attempt.temperature_range_k, alpha=0.45, color="C0")
     if data.melting_temperature_k is not None:
         axis.axhline(data.melting_temperature_k, color="black", linestyle="--", label="reported Tm")
     axis.set(xlabel="Calphy attempt", ylabel="Temperature (K)", title="Adaptive attempt history")

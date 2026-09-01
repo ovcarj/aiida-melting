@@ -14,8 +14,15 @@ from aiida import orm
 from .data import AttemptData, CalphyAnalysis, PhaseData, SwitchingData, TableData
 
 _STATE = re.compile(r"STATE:\s*Tm\s*=\s*([-+0-9.eE]+)\s*K(?:\s*\+/-\s*([-+0-9.eE]+)\s*K)?")
-_PHASE = re.compile(r"(?P<phase>solid|liquid)-(?P<temperature>[-+0-9.]+)-(?P<attempt>\d+)$")
+_NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_PHASE = re.compile(
+    rf"^(?P<prefix>ts-.+)-(?P<phase>solid|liquid)-(?P<temperature>{_NUMBER})-(?P<pressure>{_NUMBER})$"
+)
 _REPLICA = re.compile(r"(?:ts\.)?(forward|backward)_(\d+)\.dat$")
+_RANGE = re.compile(
+    r"(?:STATE:\s*)?Temperature range of\s+([-+0-9.eE]+)\s*-\s*([-+0-9.eE]+)\s*K?"
+)
+_ATTEMPT_FILE = re.compile(r"\.(\d+)\.yaml$")
 
 
 def _yaml(path: Path) -> dict:
@@ -26,12 +33,20 @@ def _yaml(path: Path) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _table(path: Path) -> TableData | None:
+def _table(path: Path, *, source: str | None = None) -> TableData | None:
     try:
         lines = path.read_text().splitlines()
     except OSError:
         return None
-    header = next((line[1:].strip() for line in lines if line.startswith("#")), "")
+    # Native Calphy tables begin with a descriptive comment followed by the
+    # machine-readable column header. Select the last comment before data.
+    comments = []
+    for line in lines:
+        if line.startswith("#"):
+            comments.append(line[1:].strip())
+        elif line.strip():
+            break
+    header = comments[-1] if comments else ""
     columns = tuple(header.split())
     try:
         values = np.loadtxt(path, comments="#", ndmin=2)
@@ -39,7 +54,9 @@ def _table(path: Path) -> TableData | None:
         return None
     if values.size == 0:
         return None
-    return TableData(columns=columns, values=np.asarray(values, dtype=float), source=str(path))
+    return TableData(
+        columns=columns, values=np.asarray(values, dtype=float), source=source or str(path)
+    )
 
 
 def _integrand(table: TableData) -> tuple[np.ndarray, np.ndarray | None]:
@@ -55,7 +72,7 @@ def _integrand(table: TableData) -> tuple[np.ndarray, np.ndarray | None]:
     return lambdas, table.values[:, system] - table.values[:, references[0]]
 
 
-def _switches(directory: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
+def _switches(directory: Path, root: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
     records: list[SwitchingData] = []
     for path in sorted(directory.glob(f"{prefix}*.dat")):
         if not prefix and path.name.startswith("ts."):
@@ -63,7 +80,7 @@ def _switches(directory: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
         match = _REPLICA.search(path.name)
         if match is None:
             continue
-        table = _table(path)
+        table = _table(path, source=str(path.relative_to(root)))
         if table is None:
             continue
         lambdas, integrand = _integrand(table)
@@ -71,7 +88,7 @@ def _switches(directory: Path, prefix: str = "") -> tuple[SwitchingData, ...]:
     return tuple(records)
 
 
-def _phase(directory: Path, name: str) -> PhaseData:
+def _phase(directory: Path, root: Path, name: str) -> PhaseData:
     files = tuple(
         str(path.relative_to(directory)) for path in sorted(directory.rglob("*")) if path.is_file()
     )
@@ -79,10 +96,13 @@ def _phase(directory: Path, name: str) -> PhaseData:
         name=name,
         directory=str(directory),
         report=_yaml(directory / "report.yaml"),
-        equilibration=_table(directory / "avg.dat"),
-        switching=_switches(directory),
-        temperature_scaling=_switches(directory, "ts."),
-        free_energy=_table(directory / "temperature_sweep.dat"),
+        equilibration=_table(directory / "avg.dat", source=str((directory / "avg.dat").relative_to(root))),
+        switching=_switches(directory, root),
+        temperature_scaling=_switches(directory, root, "ts."),
+        free_energy=_table(
+            directory / "temperature_sweep.dat",
+            source=str((directory / "temperature_sweep.dat").relative_to(root)),
+        ),
         files=files,
     )
 
@@ -106,21 +126,66 @@ def read_calphy_directory(path: str | Path) -> CalphyAnalysis:
             if np.isfinite(candidate) and candidate > 0:
                 temperature = candidate
                 uncertainty = float(match[2]) if match[2] is not None else None
-    grouped: dict[str, dict[str, PhaseData]] = {}
+    ranges: list[tuple[float, float]] = []
+    for log in logs:
+        for match in _RANGE.finditer(log.read_text(errors="replace")):
+            candidate = (float(match[1]), float(match[2]))
+            if not ranges or ranges[-1] != candidate:
+                ranges.append(candidate)
+
+    # ``ts-...-<temperature>-<pressure>`` uses the final component for
+    # pressure. The generated YAML records the actual attempt file and bracket.
+    grouped: dict[str, dict[str, object]] = {}
     for directory in sorted(root.iterdir()):
         if not directory.is_dir():
             continue
         match = _PHASE.search(directory.name)
         if match is None:
             continue
-        key = f"{match['temperature']}-{match['attempt']}"
-        grouped.setdefault(key, {})[match["phase"]] = _phase(directory, match["phase"])
+        parameters = _yaml(directory / "input_file.yaml")
+        calculation = (parameters.get("calculations") or [{}])[0]
+        inputfile = calculation.get("inputfile")
+        temperatures = calculation.get("temperature")
+        bracket = (
+            (float(temperatures[0]), float(temperatures[1]))
+            if isinstance(temperatures, list) and len(temperatures) == 2
+            else None
+        )
+        # The input-file name is Calphy's attempt identity. Fall back to a
+        # temperature/pressure identity only for incomplete legacy retrievals.
+        key = str(inputfile) if inputfile else f"{match['temperature']}@{match['pressure']}"
+        group = grouped.setdefault(
+            key,
+            {
+                "phases": {},
+                "bracket": bracket,
+                "hint": float(match["temperature"]),
+                "index": int(_ATTEMPT_FILE.search(str(inputfile)).group(1))
+                if inputfile and _ATTEMPT_FILE.search(str(inputfile))
+                else None,
+            },
+        )
+        group["phases"][match["phase"]] = _phase(directory, root, match["phase"])
+
+    def attempt_order(item: tuple[str, dict[str, object]]) -> tuple[int, float, str]:
+        key, values = item
+        index = values["index"]
+        bracket = values["bracket"]
+        if isinstance(index, int):
+            return (0, index, key)
+        if isinstance(bracket, tuple) and bracket in ranges:
+            return (1, float(ranges.index(bracket)), key)
+        return (2, float(values["hint"]), key)
+
     attempts = []
-    for key, phases in grouped.items():
+    for key, values in sorted(grouped.items(), key=attempt_order):
+        phases = values["phases"]
+        bracket = values["bracket"]
         attempts.append(
             AttemptData(
                 key=key,
-                temperature_hint_k=float(key.rsplit("-", 1)[0]),
+                temperature_hint_k=(sum(bracket) / 2 if isinstance(bracket, tuple) else values["hint"]),
+                temperature_range_k=bracket if isinstance(bracket, tuple) else None,
                 solid=phases.get("solid"),
                 liquid=phases.get("liquid"),
             )

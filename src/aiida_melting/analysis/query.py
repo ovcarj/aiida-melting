@@ -30,7 +30,14 @@ def _formula(composition: dict[str, int]) -> str | None:
 def _structure_composition(structure: orm.StructureData | None) -> dict[str, int]:
     if structure is None:
         return {}
-    return dict(sorted(Counter(site.kind_name for site in structure.sites).items()))
+    composition: Counter[str] = Counter()
+    for site in structure.sites:
+        kind = structure.get_kind(site.kind_name)
+        symbols = kind.symbols if isinstance(kind.symbols, tuple) else (kind.symbols,)
+        weights = kind.weights if kind.weights is not None else (1.0,) * len(symbols)
+        for symbol, weight in zip(symbols, weights, strict=True):
+            composition[symbol] += weight
+    return dict(sorted(composition.items()))
 
 
 def _output(node: orm.ProcessNode, name: str) -> orm.Node | None:

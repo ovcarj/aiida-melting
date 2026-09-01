@@ -12,8 +12,11 @@ from .records import ResultRecord
 
 
 def _label(record: ResultRecord) -> str:
+    artifact = record.artifact_filename or record.artifact_sha256
+    if record.artifact_filename and record.artifact_sha256:
+        artifact = f"{record.artifact_filename} ({record.artifact_sha256[:8]})"
     return " / ".join(
-        value for value in (record.formula, record.calculator, record.method) if value
+        value for value in (record.formula, record.calculator, artifact, record.method) if value
     )
 
 
@@ -50,7 +53,10 @@ def plot_size_convergence(records: Iterable[ResultRecord]):
     figure, axis = plt.subplots(figsize=(7, 4.5))
     for key, group in grouped.items():
         group.sort(key=lambda record: record.atom_count or 0)
-        label = " / ".join(value for value in key[:2] if value) or "result"
+        artifact = group[0].artifact_filename or group[0].artifact_sha256
+        if group[0].artifact_filename and group[0].artifact_sha256:
+            artifact = f"{group[0].artifact_filename} ({group[0].artifact_sha256[:8]})"
+        label = " / ".join(value for value in (*key[:2], artifact) if value) or "result"
         axis.errorbar(
             [record.atom_count for record in group],
             [record.melting_temperature_k for record in group],
