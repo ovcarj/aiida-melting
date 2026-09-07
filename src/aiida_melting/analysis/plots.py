@@ -45,7 +45,7 @@ def plot_comparison(records: Iterable[ResultRecord]):
 
 
 def plot_size_convergence(records: Iterable[ResultRecord]):
-    """Plot temperature versus prepared atom count for each potential series."""
+    """Plot cell-size histories, expanding embedded convergence wrapper reports."""
     grouped: dict[tuple[str | None, str | None, str | None], list[ResultRecord]] = defaultdict(list)
     for record in records:
         if record.atom_count is not None:
@@ -57,13 +57,37 @@ def plot_size_convergence(records: Iterable[ResultRecord]):
         if group[0].artifact_filename and group[0].artifact_sha256:
             artifact = f"{group[0].artifact_filename} ({group[0].artifact_sha256[:8]})"
         label = " / ".join(value for value in (*key[:2], artifact) if value) or "result"
-        axis.errorbar(
-            [record.atom_count for record in group],
-            [record.melting_temperature_k for record in group],
-            yerr=_uncertainties(group),
-            marker="o",
-            label=label,
-        )
+        regular = [record for record in group if not record.convergence]
+        if regular:
+            axis.errorbar(
+                [record.atom_count for record in regular],
+                [record.melting_temperature_k for record in regular],
+                yerr=_uncertainties(regular),
+                marker="o",
+                label=label,
+            )
+        for record in group:
+            history = (record.convergence or {}).get("tested", [])
+            if not isinstance(history, list):
+                continue
+            valid = [point for point in history if point.get("status") != "unconverged"]
+            excluded = [point for point in history if point.get("status") == "unconverged"]
+            if valid:
+                axis.errorbar(
+                    [point.get("atom_count") for point in valid],
+                    [point.get("temperature") for point in valid],
+                    yerr=[point.get("uncertainty_K") or np.nan for point in valid],
+                    marker="o",
+                    label=label,
+                )
+            if excluded:
+                axis.errorbar(
+                    [point.get("atom_count") for point in excluded],
+                    [point.get("temperature") for point in excluded],
+                    yerr=[point.get("uncertainty_K") or np.nan for point in excluded],
+                    fmt="x",
+                    label=f"{label} (excluded)",
+                )
     axis.set(
         xlabel="Prepared atom count",
         ylabel="Melting temperature (K)",

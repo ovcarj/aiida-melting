@@ -44,3 +44,25 @@ def test_general_plots_allow_unavailable_uncertainty(tmp_path) -> None:
         figure = plotter(records)
         figure.savefig(output)
         assert output.stat().st_size > 0
+
+
+def test_size_plot_expands_embedded_convergence_history(tmp_path) -> None:
+    """The public wrapper point is replaced by its individual tested cell sizes."""
+    record = _record(2048, 1332.0, 3.0)
+    record = ResultRecord(
+        **{
+            **record.as_dict(),
+            "convergence": {
+                "tested": [
+                    {"atom_count": 500, "temperature": 1355.0, "uncertainty_K": 4.0, "status": "success"},
+                    {"atom_count": 864, "temperature": 1332.0, "uncertainty_K": None, "status": "unconverged"},
+                ]
+            },
+        }
+    )
+    figure = plot_size_convergence([record])
+    axis = figure.axes[0]
+    assert len(axis.lines) == 2
+    output = tmp_path / "embedded-history.png"
+    figure.savefig(output)
+    assert output.stat().st_size > 0

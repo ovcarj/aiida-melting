@@ -31,6 +31,7 @@ class ResultRecord:
     uncertainty_k: float | None
     scientific_status: str | None
     report_uuid: str | None
+    convergence: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-friendly representation."""

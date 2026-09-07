@@ -95,6 +95,7 @@ def _record(node: orm.ProcessNode) -> ResultRecord | None:
         uncertainty_k=float(uncertainty) if uncertainty is not None else None,
         scientific_status=_string_value(_output(node, "status")),
         report_uuid=str(report_node.uuid) if report_node else None,
+        convergence=report.get("convergence") if isinstance(report.get("convergence"), dict) else None,
     )
 
 
